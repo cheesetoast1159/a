@@ -1,58 +1,96 @@
 import { GUNS } from './revolver.js';
 
-export const W = 960, H = 600;
+export const W = 960;
+export const H = 600;
+
 const GROUND = H * 0.80;
+const BTN_W = 220;
+const BTN_H = 220;
+const BTN_GAP = 30;
+const BTN_Y = 230;
+
+/* ---------- helpers ---------- */
+
+function inRect(px, py, r) {
+  return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+}
+
+function clamp(v, a, b) {
+  return v < a ? a : v > b ? b : v;
+}
+
+/* ---------- layout (used by main.js too) ---------- */
 
 export function zombieRect(dist, maxDist) {
-  const t = 1 - Math.max(0, Math.min(1, dist / maxDist));
+  const t = 1 - clamp(dist / maxDist, 0, 1);
   const size = 110 + t * t * 340;
-  const cx = W * 0.5;
+  const cx = W / 2;
   return { x: cx - size / 2, y: GROUND - size, w: size, h: size };
 }
 
 export function gunButtons() {
-  const w = 216, h = 210, gap = 34;
-  const total = GUNS.length * w + (GUNS.length - 1) * gap;
+  const n = GUNS.length;
+  const total = n * BTN_W + (n - 1) * BTN_GAP;
   const x0 = (W - total) / 2;
-  return GUNS.map((g, i) => ({ x: x0 + i * (w + gap), y: 236, w, h, def: g }));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({
+      x: x0 + i * (BTN_W + BTN_GAP),
+      y: BTN_Y,
+      w: BTN_W,
+      h: BTN_H,
+      def: GUNS[i],
+    });
+  }
+  return out;
 }
 
-const inRect = (p, r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-
-/* ---------------- main ---------------- */
+/* ---------- main draw ---------- */
 
 export function draw(ctx, G, mouse) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
 
   if (G.shake > 0.4) {
-    ctx.translate((Math.random() - 0.5) * G.shake, (Math.random() - 0.5) * G.shake);
+    const s = G.shake * 0.5;
+    ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
   }
 
+  drawRoom(ctx);
+
   const zr = zombieRect(G.dist, G.maxDist);
-  drawRoom(ctx, G);
-  drawZombie(ctx, zr, G.dist / G.maxDist, G);
+  drawZombie(ctx, zr, G);
 
-  if (G.state === 'menu') drawMenu(ctx, G);
-  else if (G.state === 'choose') drawChoose(ctx, G, mouse, zr);
-  else if (G.state === 'stare') drawStare(ctx, G, zr);
-  else if (G.state === 'aim') drawAim(ctx, G, mouse, zr);
-  else if (G.state === 'dead') drawDead(ctx, G);
+  switch (G.state) {
+    case 'menu':   drawMenu(ctx, G);         break;
+    case 'choose': drawChoose(ctx, G, mouse); break;
+    case 'stare':  drawStare(ctx, G);        break;
+    case 'aim':    drawAim(ctx, G, mouse);   break;
+    case 'dead':   drawDead(ctx, G);         break;
+  }
 
-  drawHUD(ctx, G);
+  if (G.state === 'stare' || G.state === 'aim') {
+    drawCylinder(ctx, G, W / 2, H - 110, 78);
+  }
+
+  if (G.state !== 'menu' && G.state !== 'dead') {
+    drawHUD(ctx, G);
+  }
+
   drawVignette(ctx, G);
   drawMessages(ctx, G);
 
   if (G.flash > 0.01) {
-    ctx.fillStyle = `rgba(255,225,190,${G.flash * 0.5})`;
+    ctx.fillStyle = 'rgba(255,225,190,' + (G.flash * 0.5) + ')';
     ctx.fillRect(0, 0, W, H);
   }
+
   ctx.restore();
 }
 
-/* ---------------- scene ---------------- */
+/* ---------- background ---------- */
 
-function drawRoom(ctx, G) {
+function drawRoom(ctx) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, '#0a0c0f');
   g.addColorStop(0.7, '#0e1114');
@@ -60,21 +98,28 @@ function drawRoom(ctx, G) {
   ctx.fillStyle = g;
   ctx.fillRect(-40, -40, W + 80, H + 80);
 
-  // floor line
   ctx.strokeStyle = 'rgba(120,130,120,0.10)';
   ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, GROUND);
+  ctx.lineTo(W, GROUND);
+  ctx.stroke();
 
-  // wall slats
   ctx.strokeStyle = 'rgba(120,130,120,0.045)';
   for (let x = 0; x < W; x += 64) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, GROUND); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, GROUND);
+    ctx.stroke();
   }
 }
 
-function drawZombie(ctx, r, t, G) {
+/* ---------- zombie ---------- */
+
+function drawZombie(ctx, r, G) {
   const cx = r.x + r.w / 2;
   const s = r.w;
+  const t = 1 - clamp(G.dist / G.maxDist, 0, 1);
   const wob = Math.sin(G.t * 3.2) * s * 0.012;
   const lean = t * s * 0.03;
 
@@ -92,54 +137,66 @@ function drawZombie(ctx, r, t, G) {
   ctx.lineWidth = Math.max(1.5, s * 0.006);
 
   // torso
-  const tw = s * 0.40, th = s * 0.46;
+  const tw = s * 0.40;
+  const th = s * 0.46;
   ctx.beginPath();
   ctx.rect(cx - tw / 2 + lean, r.y + s * 0.33, tw, th);
-  ctx.fill(); ctx.stroke();
+  ctx.fill();
+  ctx.stroke();
 
   // head
   ctx.beginPath();
   ctx.arc(cx + lean * 1.4, r.y + s * 0.21, s * 0.155, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
+  ctx.fill();
+  ctx.stroke();
 
-  // arms reaching forward (toward viewer = thicker lower)
+  // arms
   ctx.beginPath();
   ctx.moveTo(cx - tw / 2 + lean, r.y + s * 0.38);
   ctx.lineTo(cx - s * 0.30, r.y + s * 0.60);
   ctx.lineTo(cx - s * 0.24, r.y + s * 0.70);
   ctx.lineTo(cx - tw / 2 + lean, r.y + s * 0.50);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
 
   ctx.beginPath();
   ctx.moveTo(cx + tw / 2 + lean, r.y + s * 0.38);
   ctx.lineTo(cx + s * 0.30, r.y + s * 0.60);
   ctx.lineTo(cx + s * 0.24, r.y + s * 0.70);
   ctx.lineTo(cx + tw / 2 + lean, r.y + s * 0.50);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
 
   // legs
   ctx.fillRect(cx - tw * 0.42 + lean, r.y + s * 0.79, tw * 0.32, s * 0.19);
   ctx.fillRect(cx + tw * 0.10 + lean, r.y + s * 0.79, tw * 0.32, s * 0.19);
 
   // eyes
-  const eyeGlow = 0.35 + t * 0.65;
-  ctx.fillStyle = `rgba(210,255,120,${eyeGlow})`;
-  const ey = r.y + s * 0.20, ex = s * 0.055;
-  ctx.beginPath(); ctx.arc(cx + lean * 1.4 - ex, ey, s * 0.024, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx + lean * 1.4 + ex, ey, s * 0.024, 0, Math.PI * 2); ctx.fill();
+  const glow = 0.35 + t * 0.65;
+  ctx.fillStyle = 'rgba(210,255,120,' + glow + ')';
+  const ey = r.y + s * 0.20;
+  const ex = s * 0.055;
+  ctx.beginPath();
+  ctx.arc(cx + lean * 1.4 - ex, ey, s * 0.024, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + lean * 1.4 + ex, ey, s * 0.024, 0, Math.PI * 2);
+  ctx.fill();
 
   ctx.restore();
 
-  // the square hitbox — visible so aiming is honest
+  // hitbox
   ctx.save();
-  ctx.strokeStyle = `rgba(255,120,90,${0.20 + t * 0.25})`;
+  ctx.strokeStyle = 'rgba(255,120,90,' + (0.20 + t * 0.25) + ')';
   ctx.lineWidth = 2;
   ctx.setLineDash([9, 7]);
   ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.restore();
 }
 
-/* ---------------- states ---------------- */
+/* ---------- menu ---------- */
 
 function drawMenu(ctx, G) {
   ctx.fillStyle = 'rgba(0,0,0,0.62)';
@@ -156,7 +213,7 @@ function drawMenu(ctx, G) {
   ctx.fillText('The cylinder does not care.', W / 2, 300);
 
   const pulse = 0.55 + Math.sin(G.t * 3) * 0.35;
-  ctx.fillStyle = `rgba(233,226,210,${pulse})`;
+  ctx.fillStyle = 'rgba(233,226,210,' + pulse + ')';
   ctx.font = 'bold 19px ui-monospace, monospace';
   ctx.fillText('[ CLICK TO BEGIN ]', W / 2, 400);
 
@@ -165,7 +222,9 @@ function drawMenu(ctx, G) {
   ctx.fillText('empty clicks steady you. the bang does not.', W / 2, 470);
 }
 
-function drawChoose(ctx, G, mouse, zr) {
+/* ---------- choose ---------- */
+
+function drawChoose(ctx, G, mouse) {
   ctx.fillStyle = 'rgba(0,0,0,0.60)';
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
@@ -176,28 +235,30 @@ function drawChoose(ctx, G, mouse, zr) {
 
   ctx.font = '15px ui-monospace, monospace';
   ctx.fillStyle = G.dist < 34 ? '#e2705a' : '#7f8a7c';
-  ctx.fillText(`It is ${Math.round(G.dist)} paces away.`, W / 2, 140);
+  ctx.fillText('It is ' + Math.round(G.dist) + ' paces away.', W / 2, 140);
 
   const btns = gunButtons();
   const adv = G.advance;
 
-  for (const b of btns) {
-    const over = inRect(mouse, b);
+  for (let i = 0; i < btns.length; i++) {
+    const b = btns[i];
+    const over = inRect(mouse.x, mouse.y, b);
     const worst = b.def.chambers * adv;
     const risky = worst >= G.dist;
-    const hair = worst >= G.dist * 0.82 && !risky;
+    const hair = !risky && worst >= G.dist * 0.82;
 
     ctx.fillStyle = over ? 'rgba(30,36,34,0.95)' : 'rgba(17,21,20,0.92)';
     ctx.fillRect(b.x, b.y, b.w, b.h);
 
     ctx.lineWidth = 2;
-    ctx.strokeStyle = risky ? 'rgba(226,112,90,0.85)'
-                    : hair  ? 'rgba(226,180,90,0.75)'
-                    : over  ? 'rgba(180,200,180,0.7)'
-                            : 'rgba(90,100,95,0.5)';
+    if (risky)       ctx.strokeStyle = 'rgba(226,112,90,0.85)';
+    else if (hair)   ctx.strokeStyle = 'rgba(226,180,90,0.75)';
+    else if (over)   ctx.strokeStyle = 'rgba(180,200,180,0.70)';
+    else             ctx.strokeStyle = 'rgba(90,100,95,0.50)';
     ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
 
     const cx = b.x + b.w / 2;
+
     ctx.fillStyle = '#e9e2d2';
     ctx.font = 'bold 20px ui-monospace, monospace';
     ctx.fillText(b.def.name, cx, b.y + 34);
@@ -206,9 +267,10 @@ function drawChoose(ctx, G, mouse, zr) {
 
     ctx.fillStyle = '#98a396';
     ctx.font = '13px ui-monospace, monospace';
-    ctx.fillText(`${b.def.chambers} chambers`, cx, b.y + 158);
+    ctx.fillText(b.def.chambers + ' chambers', cx, b.y + 158);
+
     ctx.fillStyle = '#6d7669';
-    ctx.fillText(`first pull: 1 in ${b.def.chambers}`, cx, b.y + 178);
+    ctx.fillText('first pull: 1 in ' + b.def.chambers, cx, b.y + 178);
 
     if (risky) {
       ctx.fillStyle = '#e2705a';
@@ -229,11 +291,16 @@ function drawChoose(ctx, G, mouse, zr) {
 function drawMiniCylinder(ctx, cx, cy, r, n) {
   ctx.strokeStyle = 'rgba(140,150,140,0.4)';
   ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + Math.cos(a) * r * 0.66;
+    const y = cy + Math.sin(a) * r * 0.66;
     ctx.beginPath();
-    ctx.arc(cx + Math.cos(a) * r * 0.66, cy + Math.sin(a) * r * 0.66, r * 0.17, 0, Math.PI * 2);
+    ctx.arc(x, y, r * 0.17, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(60,70,64,0.9)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(150,160,150,0.35)';
@@ -241,37 +308,45 @@ function drawMiniCylinder(ctx, cx, cy, r, n) {
   }
 }
 
-function drawStare(ctx, G, zr) {
+/* ---------- stare ---------- */
+
+function drawStare(ctx, G) {
   ctx.textAlign = 'center';
-  const pulse = 0.4 + Math.sin(G.t * 4) * 0.25;
-  ctx.fillStyle = `rgba(200,210,195,${pulse})`;
+  const pulse = 0.40 + Math.sin(G.t * 4) * 0.25;
+  ctx.fillStyle = 'rgba(200,210,195,' + pulse + ')';
   ctx.font = 'bold 15px ui-monospace, monospace';
   ctx.fillText('CLICK TO PULL THE TRIGGER', W / 2, H - 210);
-
-  drawCylinder(ctx, G, W / 2, H - 108, 76);
 }
 
-function drawAim(ctx, G, mouse, zr) {
-  drawCylinder(ctx, G, W / 2, H - 108, 76);
+/* ---------- aim ---------- */
 
-  // aim reticle
+function drawAim(ctx, G, mouse) {
   const a = G.aim;
-  const spread = 16 + (1 - Math.max(0, Math.min(1, G.sanity / 100))) * 34;
+  if (!a) return;
+
+  const sanity01 = clamp(G.sanity / 100, 0, 1);
+  const spread = 16 + (1 - sanity01) * 34;
 
   ctx.save();
   ctx.strokeStyle = 'rgba(255,120,90,0.9)';
   ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(a.x, a.y, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,120,90,0.9)';
   ctx.beginPath();
-  ctx.moveTo(a.x - spread, a.y); ctx.lineTo(a.x - 5, a.y);
-  ctx.moveTo(a.x + 5, a.y);      ctx.lineTo(a.x + spread, a.y);
-  ctx.moveTo(a.x, a.y - spread); ctx.lineTo(a.x, a.y - 5);
-  ctx.moveTo(a.x, a.y + 5);      ctx.lineTo(a.x, a.y + spread);
+  ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(a.x - spread, a.y);
+  ctx.lineTo(a.x - 5, a.y);
+  ctx.moveTo(a.x + 5, a.y);
+  ctx.lineTo(a.x + spread, a.y);
+  ctx.moveTo(a.x, a.y - spread);
+  ctx.lineTo(a.x, a.y - 5);
+  ctx.moveTo(a.x, a.y + 5);
+  ctx.lineTo(a.x, a.y + spread);
   ctx.stroke();
   ctx.restore();
 
-  // timer bar
-  const p = Math.max(0, G.aimLeft / G.aimTotal);
+  const p = clamp(G.aimLeft / G.aimTotal, 0, 1);
   const bw = 300;
   ctx.fillStyle = 'rgba(255,255,255,0.10)';
   ctx.fillRect(W / 2 - bw / 2, 74, bw, 6);
@@ -284,6 +359,8 @@ function drawAim(ctx, G, mouse, zr) {
   ctx.fillText('AIM AND CLICK', W / 2, 62);
 }
 
+/* ---------- dead ---------- */
+
 function drawDead(ctx, G) {
   ctx.fillStyle = 'rgba(20,0,0,0.72)';
   ctx.fillRect(0, 0, W, H);
@@ -295,30 +372,36 @@ function drawDead(ctx, G) {
 
   ctx.fillStyle = '#a89c8c';
   ctx.font = '17px ui-monospace, monospace';
-  ctx.fillText(`You put down ${G.kills} of them.`, W / 2, 296);
-  ctx.fillText(`Wave ${G.wave} was the last.`, W / 2, 322);
+  ctx.fillText('You put down ' + G.kills + ' of them.', W / 2, 296);
+  ctx.fillText('Wave ' + G.wave + ' was the last.', W / 2, 322);
 
   const pulse = 0.5 + Math.sin(G.t * 3) * 0.35;
-  ctx.fillStyle = `rgba(233,226,210,${pulse})`;
+  ctx.fillStyle = 'rgba(233,226,210,' + pulse + ')';
   ctx.font = 'bold 18px ui-monospace, monospace';
   ctx.fillText('[ CLICK TO TRY AGAIN ]', W / 2, 410);
 }
 
-/* ---------------- HUD ---------------- */
+/* ---------- cylinder ---------- */
 
 function drawCylinder(ctx, G, cx, cy, r) {
-  if (!G.gun) return;
-
   const g = G.gun;
-  const shown = Math.max(0, Math.min(g.chambers, g.index + G.lie));
+  if (!g) return;
+
+  const shown = clamp(g.index + (G.lie || 0), 0, g.chambers);
 
   ctx.save();
+
   ctx.strokeStyle = 'rgba(150,160,150,0.45)';
   ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+
   ctx.strokeStyle = 'rgba(150,160,150,0.18)';
   ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(cx, cy, r * 0.80, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.80, 0, Math.PI * 2);
+  ctx.stroke();
 
   for (let i = 0; i < g.chambers; i++) {
     const a = (i / g.chambers) * Math.PI * 2 - Math.PI / 2;
@@ -329,7 +412,8 @@ function drawCylinder(ctx, G, cx, cy, r) {
     const struck = i < shown;
     const next = i === shown && !g.spent;
 
-    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+    ctx.beginPath();
+    ctx.arc(x, y, rad, 0, Math.PI * 2);
     ctx.fillStyle = struck ? 'rgba(30,34,32,0.95)' : 'rgba(70,78,72,0.9)';
     ctx.fill();
     ctx.strokeStyle = struck ? 'rgba(70,78,72,0.5)' : 'rgba(170,180,170,0.55)';
@@ -338,6 +422,7 @@ function drawCylinder(ctx, G, cx, cy, r) {
 
     if (struck) {
       ctx.strokeStyle = 'rgba(120,128,120,0.45)';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(x - rad * 0.6, y - rad * 0.6);
       ctx.lineTo(x + rad * 0.6, y + rad * 0.6);
@@ -346,19 +431,19 @@ function drawCylinder(ctx, G, cx, cy, r) {
 
     if (next) {
       const p = 0.45 + Math.sin(G.t * 6) * 0.35;
-      ctx.strokeStyle = `rgba(226,112,90,${p})`;
+      ctx.strokeStyle = 'rgba(226,112,90,' + p + ')';
       ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(x, y, rad + 5, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y, rad + 5, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 
-  // odds readout
   const left = g.chambers - shown;
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(233,226,210,0.9)';
   ctx.font = 'bold 15px ui-monospace, monospace';
-  const label = g.spent ? 'SPENT' : (left > 0 ? `1 in ${left}` : '—');
-  ctx.fillText(label, cx, cy + r + 26);
+  ctx.fillText(g.spent ? 'SPENT' : '1 in ' + left, cx, cy + r + 26);
 
   ctx.fillStyle = 'rgba(120,130,120,0.75)';
   ctx.font = '12px ui-monospace, monospace';
@@ -367,10 +452,14 @@ function drawCylinder(ctx, G, cx, cy, r) {
   ctx.restore();
 }
 
+/* ---------- HUD ---------- */
+
 function drawHUD(ctx, G) {
-  // sanity
-  const bw = 250, bh = 14, bx = 28, by = 28;
-  const p = Math.max(0, Math.min(1, G.sanity / 100));
+  const bw = 250;
+  const bh = 14;
+  const bx = 28;
+  const by = 28;
+  const p = clamp(G.sanity / 100, 0, 1);
 
   ctx.textAlign = 'left';
   ctx.fillStyle = 'rgba(140,150,140,0.75)';
@@ -390,9 +479,8 @@ function drawHUD(ctx, G) {
 
   ctx.fillStyle = 'rgba(200,210,195,0.85)';
   ctx.font = 'bold 13px ui-monospace, monospace';
-  ctx.fillText(`${Math.round(G.sanity)}`, bx + bw + 10, by + 12);
+  ctx.fillText(String(Math.round(G.sanity)), bx + bw + 10, by + 12);
 
-  // wave
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(140,150,140,0.75)';
   ctx.font = 'bold 12px ui-monospace, monospace';
@@ -401,26 +489,27 @@ function drawHUD(ctx, G) {
   ctx.font = 'bold 30px ui-monospace, monospace';
   ctx.fillText(String(G.wave), W - 28, by + 24);
 
-  // distance
-  if (G.state !== 'menu' && G.state !== 'dead') {
-    ctx.textAlign = 'right';
-    ctx.fillStyle = 'rgba(140,150,140,0.7)';
-    ctx.font = 'bold 12px ui-monospace, monospace';
-    ctx.fillText('DISTANCE', W - 28, by + 54);
-    ctx.fillStyle = G.dist < 34 ? '#e2705a' : 'rgba(200,210,195,0.8)';
-    ctx.font = 'bold 18px ui-monospace, monospace';
-    ctx.fillText(`${Math.max(0, Math.round(G.dist))}`, W - 28, by + 76);
-  }
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(140,150,140,0.7)';
+  ctx.font = 'bold 12px ui-monospace, monospace';
+  ctx.fillText('DISTANCE', W - 28, by + 54);
+  ctx.fillStyle = G.dist < 34 ? '#e2705a' : 'rgba(200,210,195,0.8)';
+  ctx.font = 'bold 18px ui-monospace, monospace';
+  ctx.fillText(String(Math.max(0, Math.round(G.dist))), W - 28, by + 76);
 }
 
+/* ---------- vignette ---------- */
+
 function drawVignette(ctx, G) {
-  const panic = 1 - Math.max(0, Math.min(1, G.sanity / 100));
+  const panic = 1 - clamp(G.sanity / 100, 0, 1);
   const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.28, W / 2, H / 2, H * 0.92);
   g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, `rgba(${Math.round(panic * 40)},0,0,${0.55 + panic * 0.4})`);
+  g.addColorStop(1, 'rgba(' + Math.round(panic * 40) + ',0,0,' + (0.55 + panic * 0.4) + ')');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 }
+
+/* ---------- messages ---------- */
 
 function drawMessages(ctx, G) {
   if (G.msgT <= 0) return;
