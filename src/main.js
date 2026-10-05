@@ -268,8 +268,19 @@ function frame(now) {
   );
   audio.setTension(Math.max(0, Math.min(1, dread)));
 
-  R.draw(ctx, G, mouse);
-  requestAnimationFrame(frame);
+    try {
+    R.draw(ctx, G, mouse);
+  } catch (err) {
+    console.error('[render error]', err);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#e2705a';
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('RENDER ERROR:', 24, 40);
+    ctx.fillText(String(err && err.message ? err.message : err), 24, 62);
+    return; // stop the loop; leave the error visible
 }
 
 requestAnimationFrame(frame);
