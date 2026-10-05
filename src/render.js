@@ -1,3 +1,5 @@
+import { GUNS } from './revolver.js';
+
 export const W = 960, H = 600;
 const GROUND = H * 0.80;
 
